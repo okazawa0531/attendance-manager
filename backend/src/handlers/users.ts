@@ -13,7 +13,7 @@ import { randomUUID } from 'crypto';
 import * as res from '../utils/response';
 
 const cognitoClient = new CognitoIdentityProviderClient({});
-const ddbClient = new DynamoDBDocumentClient(DynamoDBClient.from(new DynamoDBClient({})));
+const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 const USER_POOL_ID = process.env.USER_POOL_ID!;
 const USERS_TABLE = process.env.USERS_TABLE!;
@@ -83,7 +83,6 @@ async function createUser(event: APIGatewayProxyEvent): Promise<APIGatewayProxyR
       { Name: 'email', Value: email },
       { Name: 'email_verified', Value: 'true' },
       { Name: 'name', Value: name },
-      { Name: 'custom:userId', Value: userId },
     ],
     MessageAction: 'SUPPRESS', // 招待メール送信を抑制
   }));

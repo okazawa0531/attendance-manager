@@ -1,28 +1,10 @@
 /**
  * AWS設定ファイル
  * CDKデプロイ後に cdk-outputs.json が生成されます。
- * 本番環境では環境変数またはcdk-outputs.jsonから設定を読み込みます。
+ * ローカル開発時は frontend/.env.local に環境変数を設定してください。
  */
 import { Amplify } from 'aws-amplify';
-
-interface CdkOutputs {
-  AttendanceManagerStack: {
-    UserPoolId: string;
-    UserPoolClientId: string;
-    ApiUrl: string;
-    FrontendUrl: string;
-    FrontendBucketName: string;
-    DistributionId: string;
-  };
-}
-
-let cdkOutputs: CdkOutputs | null = null;
-try {
-  // CDKデプロイ時に自動生成されるファイル
-  cdkOutputs = (await import('./cdk-outputs.json')).default as CdkOutputs;
-} catch {
-  // ローカル開発時は環境変数から読み込む
-}
+import cdkOutputs from './cdk-outputs.json';
 
 const stack = cdkOutputs?.AttendanceManagerStack;
 
