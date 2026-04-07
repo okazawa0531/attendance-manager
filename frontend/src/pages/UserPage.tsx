@@ -225,6 +225,7 @@ function AttendanceHistory() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
@@ -245,6 +246,14 @@ function AttendanceHistory() {
     setRecords((prev) => prev.map((r) => r.date === updated.date ? updated : r));
     setEditingRecord(null);
   }
+
+  function handleAdded(added: AttendanceRecord) {
+    setRecords((prev) => [...prev, added].sort((a, b) => a.date.localeCompare(b.date)));
+    setShowAddModal(false);
+  }
+
+  // 既存レコードの日付セット（重複追加防止に使用）
+  const existingDates = new Set(records.map((r) => r.date));
 
   // サマリー計算
   const summary = records.reduce(
@@ -267,15 +276,18 @@ function AttendanceHistory() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">勤怠履歴</h1>
-          <p className="text-gray-500 text-sm mt-1">月別の勤怠記録を確認・編集できます</p>
+          <p className="text-gray-500 text-sm mt-1">月別の勤怠記録を確認・追加・編集できます</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <select value={year} onChange={(e) => setYear(e.target.value)} className="input w-28">
             {years.map((y) => <option key={y} value={y}>{y}年</option>)}
           </select>
           <select value={month} onChange={(e) => setMonth(e.target.value)} className="input w-24">
             {months.map((m) => <option key={m} value={m}>{m}月</option>)}
           </select>
+          <button onClick={() => setShowAddModal(true)} className="btn-primary whitespace-nowrap">
+            + 過去の勤怠を追加
+          </button>
         </div>
       </div>
 
@@ -370,6 +382,159 @@ function AttendanceHistory() {
           onClose={() => setEditingRecord(null)}
         />
       )}
+
+      {/* 過去の勤怠追加モーダル */}
+      {showAddModal && (
+        <AddPastAttendanceModal
+          existingDates={existingDates}
+          onAdded={handleAdded}
+          onClose={() => setShowAddModal(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 過去の勤怠追加モーダル
+// ============================================================
+interface AddPastAttendanceModalProps {
+  existingDates: Set<string>;
+  onAdded: (record: AttendanceRecord) => void;
+  onClose: () => void;
+}
+
+function AddPastAttendanceModal({ existingDates, onAdded, onClose }: AddPastAttendanceModalProps) {
+  const auth = useAuth();
+  const today = new Date().toLocaleDateString('sv-SE');
+  const [date, setDate] = useState('');
+  const [clockIn, setClockIn] = useState('');
+  const [clockOut, setClockOut] = useState('');
+  const [breakMinutes, setBreakMinutes] = useState(60);
+  const [notes, setNotes] = useState('');
+  const [status, setStatus] = useState<AttendanceStatus>('present');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const workMinutes = calcWorkMinutes(clockIn || null, clockOut || null, breakMinutes);
+  const dateAlreadyExists = date && existingDates.has(date);
+
+  async function handleSave() {
+    if (!date) { setError('日付を選択してください'); return; }
+    if (dateAlreadyExists) { setError('この日付の勤怠記録は既に存在します'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await attendanceApi.create({
+        date,
+        userId: auth.userId,
+        clockIn: clockIn || undefined,
+        clockOut: clockOut || undefined,
+        breakMinutes,
+        notes,
+        status,
+      });
+      onAdded(res.record);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '追加に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-bold text-gray-900">過去の勤怠を追加</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">日付 *</label>
+            <input
+              type="date"
+              value={date}
+              max={today}
+              onChange={(e) => { setDate(e.target.value); setError(''); }}
+              className={`input ${dateAlreadyExists ? 'border-red-400 bg-red-50' : ''}`}
+            />
+            {dateAlreadyExists && (
+              <p className="text-xs text-red-600 mt-1">この日付の記録は既に存在します</p>
+            )}
+          </div>
+
+          {workMinutes !== null && (
+            <div className="bg-primary-50 rounded-lg px-4 py-2 text-center">
+              <span className="text-sm text-primary-700">勤務時間：</span>
+              <span className="font-bold text-primary-800 ml-1">{formatMinutes(workMinutes)}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">出勤時間</label>
+              <input type="time" value={clockIn} onChange={(e) => setClockIn(e.target.value)} className="input" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">退勤時間</label>
+              <input type="time" value={clockOut} onChange={(e) => setClockOut(e.target.value)} className="input" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">休憩時間（分）</label>
+              <input
+                type="number"
+                value={breakMinutes}
+                onChange={(e) => setBreakMinutes(Number(e.target.value))}
+                className="input"
+                min={0}
+                max={480}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ステータス</label>
+              <select value={status} onChange={(e) => setStatus(e.target.value as AttendanceStatus)} className="input">
+                {Object.entries(STATUS_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">備考</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="input resize-none"
+              rows={2}
+              placeholder="備考があれば入力してください"
+            />
+          </div>
+
+          {error && (
+            <div className="bg-red-50 text-red-700 text-sm px-4 py-3 rounded-lg border border-red-200">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-3 px-6 py-4 border-t border-gray-200">
+          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
+          <button onClick={handleSave} disabled={saving || !!dateAlreadyExists} className="btn-primary flex-1">
+            {saving ? '追加中...' : '追加する'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
