@@ -110,7 +110,7 @@ function UserManagement() {
                       ? 'badge-present'
                       : 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700'
                     }>
-                      {user.role === 'admin' ? '管理者' : '一般ユーザー'}
+                      {user.role === 'admin' ? '管理者' : '利用者'}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-gray-500">
@@ -196,7 +196,7 @@ function CreateUserForm({ onCreated, onCancel }: CreateUserFormProps) {
               onChange={(e) => setRole(e.target.value as 'admin' | 'user')}
               className="input"
             >
-              <option value="user">一般ユーザー</option>
+              <option value="user">利用者</option>
               <option value="admin">管理者</option>
             </select>
           </div>
