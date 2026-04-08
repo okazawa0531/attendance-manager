@@ -69,8 +69,8 @@ export const attendanceApi = {
 
   create: (data: {
     date: string;
-    clockIn?: string;
-    clockOut?: string;
+    clockIn?: string | null;
+    clockOut?: string | null;
     breakMinutes?: number;
     notes?: string;
     status?: string;
@@ -80,8 +80,8 @@ export const attendanceApi = {
   update: (
     date: string,
     data: {
-      clockIn?: string;
-      clockOut?: string;
+      clockIn?: string | null;
+      clockOut?: string | null;
       breakMinutes?: number;
       notes?: string;
       status?: string;

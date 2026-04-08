@@ -32,7 +32,7 @@ function App() {
   async function checkAuth() {
     try {
       const user = await getCurrentUser();
-      const session = await fetchAuthSession();
+      const session = await fetchAuthSession({ forceRefresh: true });
       const claims = session.tokens?.idToken?.payload;
       const groups = (claims?.['cognito:groups'] as string[] | undefined) || [];
       setAuth({

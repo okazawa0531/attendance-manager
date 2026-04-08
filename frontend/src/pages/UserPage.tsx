@@ -34,7 +34,6 @@ function TodayAttendance() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // フォーム状態
   const [clockIn, setClockIn] = useState('');
   const [clockOut, setClockOut] = useState('');
   const [breakMinutes, setBreakMinutes] = useState(60);
@@ -67,14 +66,12 @@ function TodayAttendance() {
 
   function handleClockIn() {
     const now = new Date();
-    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    setClockIn(time);
+    setClockIn(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
   }
 
   function handleClockOut() {
     const now = new Date();
-    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    setClockOut(time);
+    setClockOut(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
   }
 
   async function handleSave() {
@@ -82,13 +79,10 @@ function TodayAttendance() {
     setError('');
     try {
       const payload = { clockIn: clockIn || undefined, clockOut: clockOut || undefined, breakMinutes, notes, status };
-      if (record) {
-        const res = await attendanceApi.update(today, payload);
-        setRecord(res.record);
-      } else {
-        const res = await attendanceApi.create({ date: today, ...payload });
-        setRecord(res.record);
-      }
+      const res = record
+        ? await attendanceApi.update(today, payload)
+        : await attendanceApi.create({ date: today, ...payload });
+      setRecord(res.record);
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存に失敗しました');
     } finally {
@@ -113,7 +107,6 @@ function TodayAttendance() {
         </div>
       ) : (
         <>
-          {/* 勤務状況カード */}
           {workMinutes !== null && (
             <div className="card bg-primary-50 border-primary-200">
               <div className="flex items-center gap-4">
@@ -130,29 +123,20 @@ function TodayAttendance() {
             </div>
           )}
 
-          {/* フォーム */}
           <div className="card space-y-5">
-            {/* 打刻ボタン */}
             <div className="grid grid-cols-2 gap-4">
-              <button
-                onClick={handleClockIn}
-                className="btn-primary py-4 text-base flex flex-col items-center gap-1"
-              >
+              <button onClick={handleClockIn} className="btn-primary py-4 text-base flex flex-col items-center gap-1">
                 <span className="text-xl">🟢</span>
                 <span>出勤打刻</span>
                 {clockIn && <span className="text-xs opacity-80">{clockIn}</span>}
               </button>
-              <button
-                onClick={handleClockOut}
-                className="btn-secondary py-4 text-base flex flex-col items-center gap-1 border-primary-200"
-              >
+              <button onClick={handleClockOut} className="btn-secondary py-4 text-base flex flex-col items-center gap-1 border-primary-200">
                 <span className="text-xl">🔴</span>
                 <span>退勤打刻</span>
                 {clockOut && <span className="text-xs text-gray-500">{clockOut}</span>}
               </button>
             </div>
 
-            {/* 手動入力 */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">出勤時間</label>
@@ -216,6 +200,8 @@ function TodayAttendance() {
 // ============================================================
 // 勤怠履歴
 // ============================================================
+type ModalTarget = { date: string; record?: AttendanceRecord };
+
 function AttendanceHistory() {
   const auth = useAuth();
   const now = new Date();
@@ -224,8 +210,7 @@ function AttendanceHistory() {
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [modalTarget, setModalTarget] = useState<ModalTarget | null>(null);
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
@@ -242,27 +227,39 @@ function AttendanceHistory() {
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  function handleEditSaved(updated: AttendanceRecord) {
-    setRecords((prev) => prev.map((r) => r.date === updated.date ? updated : r));
-    setEditingRecord(null);
+  function handleModalSaved(saved: AttendanceRecord) {
+    setRecords((prev) => {
+      const exists = prev.some((r) => r.date === saved.date);
+      return exists
+        ? prev.map((r) => r.date === saved.date ? saved : r)
+        : [...prev, saved].sort((a, b) => a.date.localeCompare(b.date));
+    });
+    setModalTarget(null);
   }
 
-  function handleAdded(added: AttendanceRecord) {
-    setRecords((prev) => [...prev, added].sort((a, b) => a.date.localeCompare(b.date)));
-    setShowAddModal(false);
-  }
-
-  // 既存レコードの日付セット（重複追加防止に使用）
+  const recordMap = new Map(records.map((r) => [r.date, r]));
   const existingDates = new Set(records.map((r) => r.date));
 
-  // サマリー計算
+  const allDates = (() => {
+    const y = Number(year);
+    const m = Number(month);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    return Array.from({ length: daysInMonth }, (_, i) => {
+      const d = String(i + 1).padStart(2, '0');
+      const mm = String(m).padStart(2, '0');
+      return `${y}-${mm}-${d}`;
+    });
+  })();
+
   const summary = records.reduce(
     (acc, r) => {
-      const mins = calcWorkMinutes(r.clockIn, r.clockOut, r.breakMinutes);
-      if (r.status === 'present') acc.presentDays++;
+      if (r.status === 'present') {
+        acc.presentDays++;
+        const mins = calcWorkMinutes(r.clockIn, r.clockOut, r.breakMinutes);
+        if (mins) acc.totalMinutes += mins;
+      }
       if (r.status === 'paid_leave') acc.paidLeaveDays++;
       if (r.status === 'absent') acc.absentDays++;
-      if (mins) acc.totalMinutes += mins;
       return acc;
     },
     { presentDays: 0, paidLeaveDays: 0, absentDays: 0, totalMinutes: 0 },
@@ -276,7 +273,7 @@ function AttendanceHistory() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">勤怠履歴</h1>
-          <p className="text-gray-500 text-sm mt-1">月別の勤怠記録を確認・追加・編集できます</p>
+          <p className="text-gray-500 text-sm mt-1">月別の勤怠記録を確認・編集できます</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <select value={year} onChange={(e) => setYear(e.target.value)} className="input w-28">
@@ -285,13 +282,9 @@ function AttendanceHistory() {
           <select value={month} onChange={(e) => setMonth(e.target.value)} className="input w-24">
             {months.map((m) => <option key={m} value={m}>{m}月</option>)}
           </select>
-          <button onClick={() => setShowAddModal(true)} className="btn-primary whitespace-nowrap">
-            + 過去の勤怠を追加
-          </button>
         </div>
       </div>
 
-      {/* サマリーカード */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
           { label: '出勤日数', value: `${summary.presentDays}日`, color: 'text-green-700' },
@@ -307,21 +300,13 @@ function AttendanceHistory() {
       </div>
 
       {error && (
-        <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg border border-red-200 text-sm">
-          {error}
-        </div>
+        <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg border border-red-200 text-sm">{error}</div>
       )}
 
-      {/* テーブル */}
       <div className="card p-0 overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-4 border-primary-600 border-t-transparent" />
-          </div>
-        ) : records.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">
-            <p className="text-lg">記録がありません</p>
-            <p className="text-sm mt-1">「今日の勤怠」ページから登録してください</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -339,31 +324,43 @@ function AttendanceHistory() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {records.map((r) => {
-                  const workMins = calcWorkMinutes(r.clockIn, r.clockOut, r.breakMinutes);
-                  const dateObj = new Date(r.date + 'T00:00:00');
+                {allDates.map((date) => {
+                  const r = recordMap.get(date);
+                  const dateObj = new Date(date + 'T00:00:00');
                   const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
                   const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                  const isPresent = r?.status === 'present';
+                  const workMins = isPresent ? calcWorkMinutes(r!.clockIn, r!.clockOut, r!.breakMinutes) : null;
+
                   return (
-                    <tr key={r.date} className={`hover:bg-gray-50 transition-colors ${isWeekend ? 'bg-gray-50/50' : ''}`}>
+                    <tr key={date} className={`hover:bg-gray-50 transition-colors ${isWeekend ? 'bg-gray-50/50' : ''}`}>
                       <td className={`px-4 py-3 font-medium ${isWeekend ? 'text-red-600' : 'text-gray-900'}`}>
-                        {r.date} ({dayOfWeek})
+                        {date} ({dayOfWeek})
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={r.status} />
+                        {r ? <StatusBadge status={r.status} /> : <span className="badge-unregistered">未登録</span>}
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{r.clockIn || '-'}</td>
-                      <td className="px-4 py-3 text-gray-600">{r.clockOut || '-'}</td>
-                      <td className="px-4 py-3 text-gray-500">{r.breakMinutes}分</td>
+                      <td className="px-4 py-3 text-gray-600">{isPresent ? (r!.clockIn || '-') : '-'}</td>
+                      <td className="px-4 py-3 text-gray-600">{isPresent ? (r!.clockOut || '-') : '-'}</td>
+                      <td className="px-4 py-3 text-gray-500">{isPresent ? `${r!.breakMinutes}分` : '-'}</td>
                       <td className="px-4 py-3 font-medium text-primary-700">{formatMinutes(workMins)}</td>
-                      <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{r.notes || '-'}</td>
+                      <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{r?.notes || '-'}</td>
                       <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => setEditingRecord(r)}
-                          className="text-xs text-primary-600 hover:text-primary-800 font-medium border border-primary-200 hover:border-primary-400 px-2 py-1 rounded transition-colors"
-                        >
-                          編集
-                        </button>
+                        {r ? (
+                          <button
+                            onClick={() => setModalTarget({ date, record: r })}
+                            className="text-xs text-primary-600 hover:text-primary-800 font-medium border border-primary-200 hover:border-primary-400 px-2 py-1 rounded transition-colors"
+                          >
+                            編集
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setModalTarget({ date })}
+                            className="text-xs text-gray-500 hover:text-primary-700 font-medium border border-gray-200 hover:border-primary-300 px-2 py-1 rounded transition-colors"
+                          >
+                            登録
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -374,21 +371,13 @@ function AttendanceHistory() {
         )}
       </div>
 
-      {/* 編集モーダル */}
-      {editingRecord && (
-        <EditModal
-          record={editingRecord}
-          onSaved={handleEditSaved}
-          onClose={() => setEditingRecord(null)}
-        />
-      )}
-
-      {/* 過去の勤怠追加モーダル */}
-      {showAddModal && (
-        <AddPastAttendanceModal
+      {modalTarget && (
+        <AttendanceModal
+          date={modalTarget.date}
+          record={modalTarget.record}
           existingDates={existingDates}
-          onAdded={handleAdded}
-          onClose={() => setShowAddModal(false)}
+          onSaved={handleModalSaved}
+          onClose={() => setModalTarget(null)}
         />
       )}
     </div>
@@ -396,28 +385,55 @@ function AttendanceHistory() {
 }
 
 // ============================================================
-// 過去の勤怠追加モーダル
+// 勤怠編集モーダル（新規登録・編集共通）
 // ============================================================
-interface AddPastAttendanceModalProps {
+interface AttendanceModalProps {
+  date: string;
+  record?: AttendanceRecord;
   existingDates: Set<string>;
-  onAdded: (record: AttendanceRecord) => void;
+  onSaved: (record: AttendanceRecord) => void;
   onClose: () => void;
 }
 
-function AddPastAttendanceModal({ existingDates, onAdded, onClose }: AddPastAttendanceModalProps) {
+const DEFAULT_CLOCK_IN = '09:00';
+const DEFAULT_CLOCK_OUT = '18:00';
+const DEFAULT_BREAK_MINUTES = 60;
+
+function AttendanceModal({ date: initialDate, record, existingDates, onSaved, onClose }: AttendanceModalProps) {
   const auth = useAuth();
   const today = new Date().toLocaleDateString('sv-SE');
-  const [date, setDate] = useState('');
-  const [clockIn, setClockIn] = useState('');
-  const [clockOut, setClockOut] = useState('');
-  const [breakMinutes, setBreakMinutes] = useState(60);
-  const [notes, setNotes] = useState('');
-  const [status, setStatus] = useState<AttendanceStatus>('present');
+  const isEdit = !!record;
+
+  const [date, setDate] = useState(initialDate);
+  const [status, setStatus] = useState<AttendanceStatus>(record?.status ?? 'present');
+  const [clockIn, setClockIn] = useState(
+    record?.status === 'present' ? (record.clockIn || DEFAULT_CLOCK_IN) : DEFAULT_CLOCK_IN,
+  );
+  const [clockOut, setClockOut] = useState(
+    record?.status === 'present' ? (record.clockOut || DEFAULT_CLOCK_OUT) : DEFAULT_CLOCK_OUT,
+  );
+  const [breakMinutes, setBreakMinutes] = useState(
+    record?.status === 'present' ? record.breakMinutes : DEFAULT_BREAK_MINUTES,
+  );
+  const [notes, setNotes] = useState(record?.notes ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const workMinutes = calcWorkMinutes(clockIn || null, clockOut || null, breakMinutes);
-  const dateAlreadyExists = date && existingDates.has(date);
+  const workMinutes = status === 'present' ? calcWorkMinutes(clockIn || null, clockOut || null, breakMinutes) : null;
+  const dateAlreadyExists = !isEdit && !!date && existingDates.has(date);
+
+  function handleStatusChange(newStatus: AttendanceStatus) {
+    setStatus(newStatus);
+    if (newStatus === 'present') {
+      setClockIn(DEFAULT_CLOCK_IN);
+      setClockOut(DEFAULT_CLOCK_OUT);
+      setBreakMinutes(DEFAULT_BREAK_MINUTES);
+    } else {
+      setClockIn('');
+      setClockOut('');
+      setBreakMinutes(0);
+    }
+  }
 
   async function handleSave() {
     if (!date) { setError('日付を選択してください'); return; }
@@ -425,151 +441,14 @@ function AddPastAttendanceModal({ existingDates, onAdded, onClose }: AddPastAtte
     setSaving(true);
     setError('');
     try {
-      const res = await attendanceApi.create({
-        date,
-        userId: auth.userId,
-        clockIn: clockIn || undefined,
-        clockOut: clockOut || undefined,
-        breakMinutes,
-        notes,
-        status,
-      });
-      onAdded(res.record);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '追加に失敗しました');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-bold text-gray-900">過去の勤怠を追加</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="px-6 py-5 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">日付 *</label>
-            <input
-              type="date"
-              value={date}
-              max={today}
-              onChange={(e) => { setDate(e.target.value); setError(''); }}
-              className={`input ${dateAlreadyExists ? 'border-red-400 bg-red-50' : ''}`}
-            />
-            {dateAlreadyExists && (
-              <p className="text-xs text-red-600 mt-1">この日付の記録は既に存在します</p>
-            )}
-          </div>
-
-          {workMinutes !== null && (
-            <div className="bg-primary-50 rounded-lg px-4 py-2 text-center">
-              <span className="text-sm text-primary-700">勤務時間：</span>
-              <span className="font-bold text-primary-800 ml-1">{formatMinutes(workMinutes)}</span>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">出勤時間</label>
-              <input type="time" value={clockIn} onChange={(e) => setClockIn(e.target.value)} className="input" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">退勤時間</label>
-              <input type="time" value={clockOut} onChange={(e) => setClockOut(e.target.value)} className="input" />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">休憩時間（分）</label>
-              <input
-                type="number"
-                value={breakMinutes}
-                onChange={(e) => setBreakMinutes(Number(e.target.value))}
-                className="input"
-                min={0}
-                max={480}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ステータス</label>
-              <select value={status} onChange={(e) => setStatus(e.target.value as AttendanceStatus)} className="input">
-                {Object.entries(STATUS_LABELS).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">備考</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="input resize-none"
-              rows={2}
-              placeholder="備考があれば入力してください"
-            />
-          </div>
-
-          {error && (
-            <div className="bg-red-50 text-red-700 text-sm px-4 py-3 rounded-lg border border-red-200">
-              {error}
-            </div>
-          )}
-        </div>
-
-        <div className="flex gap-3 px-6 py-4 border-t border-gray-200">
-          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
-          <button onClick={handleSave} disabled={saving || !!dateAlreadyExists} className="btn-primary flex-1">
-            {saving ? '追加中...' : '追加する'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// 編集モーダル
-// ============================================================
-interface EditModalProps {
-  record: AttendanceRecord;
-  onSaved: (updated: AttendanceRecord) => void;
-  onClose: () => void;
-}
-
-function EditModal({ record, onSaved, onClose }: EditModalProps) {
-  const [clockIn, setClockIn] = useState(record.clockIn || '');
-  const [clockOut, setClockOut] = useState(record.clockOut || '');
-  const [breakMinutes, setBreakMinutes] = useState(record.breakMinutes);
-  const [notes, setNotes] = useState(record.notes);
-  const [status, setStatus] = useState<AttendanceStatus>(record.status);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  const workMinutes = calcWorkMinutes(clockIn || null, clockOut || null, breakMinutes);
-
-  async function handleSave() {
-    setSaving(true);
-    setError('');
-    try {
-      const res = await attendanceApi.update(record.date, {
-        clockIn: clockIn || undefined,
-        clockOut: clockOut || undefined,
-        breakMinutes,
-        notes,
-        status,
-      });
+      const timeFields = {
+        clockIn: status === 'present' ? (clockIn || null) : null,
+        clockOut: status === 'present' ? (clockOut || null) : null,
+        breakMinutes: status === 'present' ? breakMinutes : 0,
+      };
+      const res = isEdit
+        ? await attendanceApi.update(date, { ...timeFields, notes, status })
+        : await attendanceApi.create({ date, userId: auth.userId, ...timeFields, notes, status });
       onSaved(res.record);
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存に失敗しました');
@@ -580,16 +459,12 @@ function EditModal({ record, onSaved, onClose }: EditModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* オーバーレイ */}
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-
-      {/* モーダル本体 */}
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md">
-        {/* ヘッダー */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <div>
             <h2 className="text-lg font-bold text-gray-900">勤怠編集</h2>
-            <p className="text-sm text-gray-500">{record.date}</p>
+            {isEdit && <p className="text-sm text-gray-500">{date}</p>}
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -598,48 +473,63 @@ function EditModal({ record, onSaved, onClose }: EditModalProps) {
           </button>
         </div>
 
-        {/* フォーム */}
         <div className="px-6 py-5 space-y-4">
-          {/* 勤務時間プレビュー */}
-          {workMinutes !== null && (
-            <div className="bg-primary-50 rounded-lg px-4 py-2 text-center">
-              <span className="text-sm text-primary-700">勤務時間：</span>
-              <span className="font-bold text-primary-800 ml-1">{formatMinutes(workMinutes)}</span>
+          {!isEdit && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">日付 *</label>
+              <input
+                type="date"
+                value={date}
+                max={today}
+                onChange={(e) => { setDate(e.target.value); setError(''); }}
+                className={`input ${dateAlreadyExists ? 'border-red-400 bg-red-50' : ''}`}
+              />
+              {dateAlreadyExists && (
+                <p className="text-xs text-red-600 mt-1">この日付の記録は既に存在します</p>
+              )}
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">出勤時間</label>
-              <input type="time" value={clockIn} onChange={(e) => setClockIn(e.target.value)} className="input" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">退勤時間</label>
-              <input type="time" value={clockOut} onChange={(e) => setClockOut(e.target.value)} className="input" />
-            </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ステータス</label>
+            <select value={status} onChange={(e) => handleStatusChange(e.target.value as AttendanceStatus)} className="input">
+              {Object.entries(STATUS_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">休憩時間（分）</label>
-              <input
-                type="number"
-                value={breakMinutes}
-                onChange={(e) => setBreakMinutes(Number(e.target.value))}
-                className="input"
-                min={0}
-                max={480}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ステータス</label>
-              <select value={status} onChange={(e) => setStatus(e.target.value as AttendanceStatus)} className="input">
-                {Object.entries(STATUS_LABELS).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+          {status === 'present' && (
+            <>
+              {workMinutes !== null && (
+                <div className="bg-primary-50 rounded-lg px-4 py-2 text-center">
+                  <span className="text-sm text-primary-700">勤務時間：</span>
+                  <span className="font-bold text-primary-800 ml-1">{formatMinutes(workMinutes)}</span>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">出勤時間</label>
+                  <input type="time" value={clockIn} onChange={(e) => setClockIn(e.target.value)} className="input" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">退勤時間</label>
+                  <input type="time" value={clockOut} onChange={(e) => setClockOut(e.target.value)} className="input" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">休憩時間（分）</label>
+                <input
+                  type="number"
+                  value={breakMinutes}
+                  onChange={(e) => setBreakMinutes(Number(e.target.value))}
+                  className="input"
+                  min={0}
+                  max={480}
+                />
+              </div>
+            </>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">備考</label>
@@ -653,18 +543,13 @@ function EditModal({ record, onSaved, onClose }: EditModalProps) {
           </div>
 
           {error && (
-            <div className="bg-red-50 text-red-700 text-sm px-4 py-3 rounded-lg border border-red-200">
-              {error}
-            </div>
+            <div className="bg-red-50 text-red-700 text-sm px-4 py-3 rounded-lg border border-red-200">{error}</div>
           )}
         </div>
 
-        {/* フッター */}
         <div className="flex gap-3 px-6 py-4 border-t border-gray-200">
-          <button onClick={onClose} className="btn-secondary flex-1">
-            キャンセル
-          </button>
-          <button onClick={handleSave} disabled={saving} className="btn-primary flex-1">
+          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
+          <button onClick={handleSave} disabled={saving || dateAlreadyExists} className="btn-primary flex-1">
             {saving ? '保存中...' : '保存する'}
           </button>
         </div>
