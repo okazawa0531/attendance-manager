@@ -3,8 +3,8 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../App';
 import { attendanceApi, calcWorkMinutes, formatMinutes } from '../api/client';
-import type { AttendanceRecord, AttendanceStatus } from '../types';
-import { STATUS_LABELS } from '../types';
+import type { AttendanceRecord, AttendanceStatus, WorkType } from '../types';
+import { STATUS_LABELS, WORK_TYPE_LABELS } from '../types';
 
 const NAV_ITEMS = [
   { label: '今日の勤怠', href: '/user' },
@@ -39,6 +39,7 @@ function TodayAttendance() {
   const [breakMinutes, setBreakMinutes] = useState(60);
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState<AttendanceStatus>('present');
+  const [workType, setWorkType] = useState<WorkType>('office');
 
   const loadToday = useCallback(async () => {
     setLoading(true);
@@ -54,6 +55,7 @@ function TodayAttendance() {
         setBreakMinutes(todayRecord.breakMinutes);
         setNotes(todayRecord.notes);
         setStatus(todayRecord.status);
+        setWorkType(todayRecord.workType ?? 'office');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'データの取得に失敗しました');
@@ -78,7 +80,7 @@ function TodayAttendance() {
     setSaving(true);
     setError('');
     try {
-      const payload = { clockIn: clockIn || undefined, clockOut: clockOut || undefined, breakMinutes, notes, status };
+      const payload = { clockIn: clockIn || undefined, clockOut: clockOut || undefined, breakMinutes, notes, status, workType: status === 'present' ? workType : null };
       const res = record
         ? await attendanceApi.update(today, payload)
         : await attendanceApi.create({ date: today, ...payload });
@@ -169,6 +171,17 @@ function TodayAttendance() {
                 </select>
               </div>
             </div>
+
+            {status === 'present' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">勤務形態</label>
+                <select value={workType} onChange={(e) => setWorkType(e.target.value as WorkType)} className="input">
+                  {Object.entries(WORK_TYPE_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">備考</label>
@@ -265,6 +278,16 @@ function AttendanceHistory() {
     { presentDays: 0, paidLeaveDays: 0, absentDays: 0, totalMinutes: 0 },
   );
 
+  const overtimeMinutes = summary.totalMinutes - summary.presentDays * 480;
+
+  function formatOvertime(minutes: number): string {
+    const sign = minutes < 0 ? '-' : '+';
+    const abs = Math.abs(minutes);
+    const h = Math.floor(abs / 60);
+    const m = abs % 60;
+    return `${sign}${h}時間${m > 0 ? m + '分' : ''}`;
+  }
+
   const years = Array.from({ length: 5 }, (_, i) => String(now.getFullYear() - i));
   const months = Array.from({ length: 12 }, (_, i) => String(i + 1));
 
@@ -285,12 +308,17 @@ function AttendanceHistory() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         {[
           { label: '出勤日数', value: `${summary.presentDays}日`, color: 'text-green-700' },
           { label: '有給休暇', value: `${summary.paidLeaveDays}日`, color: 'text-purple-700' },
           { label: '欠勤', value: `${summary.absentDays}日`, color: 'text-red-700' },
           { label: '総勤務時間', value: formatMinutes(summary.totalMinutes), color: 'text-primary-700' },
+          {
+            label: '残業時間',
+            value: summary.presentDays > 0 ? formatOvertime(overtimeMinutes) : '-',
+            color: overtimeMinutes >= 0 ? 'text-orange-600' : 'text-gray-500',
+          },
         ].map((item) => (
           <div key={item.label} className="card text-center p-4">
             <p className="text-xs text-gray-500 mb-1">{item.label}</p>
@@ -315,6 +343,7 @@ function AttendanceHistory() {
                 <tr>
                   <th className="px-4 py-3 text-left font-semibold text-gray-600">日付</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-600">ステータス</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-600">勤務形態</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-600">出勤</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-600">退勤</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-600">休憩</th>
@@ -339,6 +368,9 @@ function AttendanceHistory() {
                       </td>
                       <td className="px-4 py-3">
                         {r ? <StatusBadge status={r.status} /> : <span className="badge-unregistered">未登録</span>}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">
+                        {isPresent && r!.workType ? WORK_TYPE_LABELS[r!.workType] : '-'}
                       </td>
                       <td className="px-4 py-3 text-gray-600">{isPresent ? (r!.clockIn || '-') : '-'}</td>
                       <td className="px-4 py-3 text-gray-600">{isPresent ? (r!.clockOut || '-') : '-'}</td>
@@ -406,6 +438,7 @@ function AttendanceModal({ date: initialDate, record, existingDates, onSaved, on
 
   const [date, setDate] = useState(initialDate);
   const [status, setStatus] = useState<AttendanceStatus>(record?.status ?? 'present');
+  const [workType, setWorkType] = useState<WorkType>(record?.workType ?? 'office');
   const [clockIn, setClockIn] = useState(
     record?.status === 'present' ? (record.clockIn || DEFAULT_CLOCK_IN) : DEFAULT_CLOCK_IN,
   );
@@ -428,6 +461,7 @@ function AttendanceModal({ date: initialDate, record, existingDates, onSaved, on
       setClockIn(DEFAULT_CLOCK_IN);
       setClockOut(DEFAULT_CLOCK_OUT);
       setBreakMinutes(DEFAULT_BREAK_MINUTES);
+      setWorkType('office');
     } else {
       setClockIn('');
       setClockOut('');
@@ -445,6 +479,7 @@ function AttendanceModal({ date: initialDate, record, existingDates, onSaved, on
         clockIn: status === 'present' ? (clockIn || null) : null,
         clockOut: status === 'present' ? (clockOut || null) : null,
         breakMinutes: status === 'present' ? breakMinutes : 0,
+        workType: status === 'present' ? workType : null,
       };
       const res = isEdit
         ? await attendanceApi.update(date, { ...timeFields, notes, status })
@@ -507,6 +542,14 @@ function AttendanceModal({ date: initialDate, record, existingDates, onSaved, on
                   <span className="font-bold text-primary-800 ml-1">{formatMinutes(workMinutes)}</span>
                 </div>
               )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">勤務形態</label>
+                <select value={workType} onChange={(e) => setWorkType(e.target.value as WorkType)} className="input">
+                  {Object.entries(WORK_TYPE_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">出勤時間</label>

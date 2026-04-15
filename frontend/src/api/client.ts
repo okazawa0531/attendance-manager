@@ -74,6 +74,7 @@ export const attendanceApi = {
     breakMinutes?: number;
     notes?: string;
     status?: string;
+    workType?: string | null;
     userId?: string;
   }): Promise<{ record: AttendanceRecord }> => request('POST', '/attendance', data),
 
@@ -85,6 +86,7 @@ export const attendanceApi = {
       breakMinutes?: number;
       notes?: string;
       status?: string;
+      workType?: string | null;
       userId?: string;
     },
   ): Promise<{ record: AttendanceRecord }> => request('PUT', `/attendance/${date}`, data),

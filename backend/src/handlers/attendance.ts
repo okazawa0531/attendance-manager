@@ -94,7 +94,7 @@ async function createAttendance(event: APIGatewayProxyEvent): Promise<APIGateway
   const body = JSON.parse(event.body || '{}');
 
   const targetUserId = body.userId && admin ? body.userId : callerId;
-  const { date, clockIn, clockOut, breakMinutes, notes, status } = body;
+  const { date, clockIn, clockOut, breakMinutes, notes, status, workType } = body;
 
   if (!date) {
     return res.badRequest('date は必須です（YYYY-MM-DD形式）');
@@ -113,6 +113,7 @@ async function createAttendance(event: APIGatewayProxyEvent): Promise<APIGateway
     breakMinutes: breakMinutes ?? 60,
     notes: notes || '',
     status: status || 'present',
+    workType: workType || null,
     createdAt: now,
     updatedAt: now,
   };
@@ -142,17 +143,19 @@ async function updateAttendance(event: APIGatewayProxyEvent, date: string): Prom
     return res.notFound('勤怠記録が見つかりません');
   }
 
-  const { clockIn, clockOut, breakMinutes, notes, status } = body;
+  const { clockIn, clockOut, breakMinutes, notes, status, workType } = body;
   const updateExpressions: string[] = ['updatedAt = :now'];
   const expressionAttributeValues: Record<string, unknown> = {
     ':now': new Date().toISOString(),
   };
+  const expressionAttributeNames: Record<string, string> = {};
 
   if (clockIn !== undefined) { updateExpressions.push('clockIn = :ci'); expressionAttributeValues[':ci'] = clockIn; }
   if (clockOut !== undefined) { updateExpressions.push('clockOut = :co'); expressionAttributeValues[':co'] = clockOut; }
   if (breakMinutes !== undefined) { updateExpressions.push('breakMinutes = :bm'); expressionAttributeValues[':bm'] = breakMinutes; }
   if (notes !== undefined) { updateExpressions.push('notes = :n'); expressionAttributeValues[':n'] = notes; }
-  if (status !== undefined) { updateExpressions.push('#s = :st'); expressionAttributeValues[':st'] = status; }
+  if (status !== undefined) { updateExpressions.push('#s = :st'); expressionAttributeValues[':st'] = status; expressionAttributeNames['#s'] = 'status'; }
+  if (workType !== undefined) { updateExpressions.push('workType = :wt'); expressionAttributeValues[':wt'] = workType; }
 
   const params: Record<string, unknown> = {
     TableName: ATTENDANCE_TABLE,
@@ -162,8 +165,8 @@ async function updateAttendance(event: APIGatewayProxyEvent, date: string): Prom
     ReturnValues: 'ALL_NEW',
   };
 
-  if (status !== undefined) {
-    params.ExpressionAttributeNames = { '#s': 'status' };
+  if (Object.keys(expressionAttributeNames).length > 0) {
+    params.ExpressionAttributeNames = expressionAttributeNames;
   }
 
   const result = await ddbClient.send(new UpdateCommand(params as Parameters<typeof ddbClient.send>[0]['input']));
